@@ -22,8 +22,6 @@ click==8.2.0
     # via uvicorn
 decorator==5.2.1
     # via moviepy
-evdev==2.0.0
-    # via -r requirements.in
 fastapi==0.115.12
     # via -r requirements.in
 ffmpeg-python==0.2.0
