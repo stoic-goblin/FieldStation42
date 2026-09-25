@@ -8,7 +8,7 @@ fastapi
 uvicorn
 glfw
 PyOpenGL
-PySide6>=6.8
+# Qt binding supplied by the Media Appliance OS (PyQt6 + QtWebEngine).
 jsonschema
 requests
 mutagen

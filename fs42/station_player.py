@@ -22,7 +22,7 @@ try:
     WEB_RENDER_AVAILABLE = True
 except ImportError as e:
     logging.getLogger("station_player").info(
-        "Web rendering disabled (PySide6 QtWebEngine not available): %s", e
+        "Web rendering disabled (Qt WebEngine backend not available): %s", e
     )
     WEB_RENDER_AVAILABLE = False
     web_render_runner = None
@@ -606,8 +606,8 @@ class StationPlayer:
 
     def show_web(self, web_config, blocking=True):
         if not WEB_RENDER_AVAILABLE:
-            self._l.error("Web rendering not available - PySide6 not installed")
-            msg = "Web rendering requires PySide6 to be installed and configured. Please check documentation."
+            self._l.error("Web rendering not available - Qt WebEngine backend unavailable")
+            msg = "Web rendering requires a supported Qt WebEngine backend. Please check documentation."
             return PlayerOutcome(PlayerState.EXIT_COMMAND, msg)
 
         # create the pipe to communicate with the web channel

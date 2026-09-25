@@ -1,9 +1,8 @@
 import signal
-from PySide6.QtCore import QUrl, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QMainWindow
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEngineSettings
-from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
+from fs42.qt_compat import (
+    QApplication, QMainWindow, QQuickWindow, QSGRendererInterface, QTimer, QUrl,
+    QWebEngineSettings, QWebEngineView, Qt,
+)
 
 class WebRender(QMainWindow):
     def __init__(self):

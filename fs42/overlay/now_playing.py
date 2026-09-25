@@ -5,9 +5,11 @@ import os
 import tempfile
 import sqlite3
 import json
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtGui import QColor, QPainter, QFont, QLinearGradient, QFontMetrics
-from PySide6.QtCore import Qt, QRect
+from fs42.qt_compat import (
+    QApplication, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QRect,
+    QWidget, Qt, QFONT_BOLD, QFONT_NORMAL, QPAINTER_ANTIALIASING,
+    QPAINTER_TEXT_ANTIALIASING,
+)
 from pathlib import Path
 
 
@@ -99,8 +101,8 @@ class NowPlayingWindow(QWidget):
         self.text_shadow = QColor(0, 0, 0, 200)         # Strong shadow for readability
 
         # Fonts - scaled for screen resolution
-        self.title_font = QFont("Arial", title_size, QFont.Bold)
-        self.info_font = QFont("Arial", info_size, QFont.Normal)
+        self.title_font = QFont("Arial", title_size, QFONT_BOLD)
+        self.info_font = QFont("Arial", info_size, QFONT_NORMAL)
 
         # Store scale factor for use in paintEvent
         self.scale_factor = scale_factor
@@ -151,8 +153,8 @@ class NowPlayingWindow(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.setRenderHint(QPAINTER_ANTIALIASING)
+        painter.setRenderHint(QPAINTER_TEXT_ANTIALIASING)
 
         # Calculate text widths to determine box width
         title_metrics = QFontMetrics(self.title_font)

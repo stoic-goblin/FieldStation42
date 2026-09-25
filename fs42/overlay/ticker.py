@@ -3,9 +3,11 @@ import signal
 import multiprocessing
 import os
 import tempfile
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
-from PySide6.QtGui import QPixmap, QColor, QPaintEvent, QPainter, QFont, QFontMetrics, QLinearGradient, QPen
-from PySide6.QtCore import QTimer, Qt, QPointF, QSharedMemory, QRect
+from fs42.qt_compat import (
+    QApplication, QColor, QFont, QFontMetrics, QLinearGradient, QPaintEvent,
+    QPainter, QPen, QPixmap, QPointF, QRect, QSharedMemory, QTimer, QVBoxLayout,
+    QWidget, Qt, QFONT_BOLD, QPAINTER_ANTIALIASING,
+)
 from pathlib import Path
 
 
@@ -137,8 +139,8 @@ class TickerWindow(QWidget):
         self.iterations = 0
         self.max_iterations = 2
         self.current_iterations = 0
-        self.font = QFont("Arial", 20, QFont.Bold)  
-        self.header_font = QFont("Arial", 12, QFont.Bold) 
+        self.font = QFont("Arial", 20, QFONT_BOLD)
+        self.header_font = QFont("Arial", 12, QFONT_BOLD)
         self.text_color = QColor(255, 255, 255)
         
         # Timer for scrolling animation
@@ -199,7 +201,7 @@ class TickerWindow(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPAINTER_ANTIALIASING)
         
         # Calculate bottom area for ticker content
         ticker_x = (self.width() - self.ticker_width) // 2

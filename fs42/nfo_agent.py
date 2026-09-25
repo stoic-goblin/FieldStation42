@@ -46,12 +46,14 @@ def _run_overlay_app(lines, play_duration, show_seconds, overlay_cfg):
 
     import sys
     import signal
-    from PySide6.QtWidgets import QApplication, QWidget
-    from PySide6.QtGui import QColor, QPainter, QFont, QFontMetrics, QFontDatabase
-    from PySide6.QtCore import Qt, QTimer
+    from fs42.qt_compat import (
+        QApplication, QColor, QFont, QFontDatabase, QFontMetrics, QPainter,
+        QTimer, QWidget, Qt, QFONT_BOLD, QFONT_NORMAL, QPAINTER_ANTIALIASING,
+        QPAINTER_TEXT_ANTIALIASING,
+    )
 
     def _qt_weight(weight_str):
-        return QFont.Bold if weight_str == "bold" else QFont.Normal
+        return QFONT_BOLD if weight_str == "bold" else QFONT_NORMAL
 
     class NFOOverlayWindow(QWidget):
         def __init__(self, nfo_lines):
@@ -127,7 +129,7 @@ def _run_overlay_app(lines, play_duration, show_seconds, overlay_cfg):
             if not self.lines:
                 return
 
-            from PySide6.QtGui import QPixmap
+            from fs42.qt_compat import QPixmap
 
             # Render text and effect to an off-screen pixmap at full opacity so
             # overlapping shadow copies composite correctly, then draw the whole
@@ -136,8 +138,8 @@ def _run_overlay_app(lines, play_duration, show_seconds, overlay_cfg):
             pixmap.fill(Qt.transparent)
 
             pm = QPainter(pixmap)
-            pm.setRenderHint(QPainter.Antialiasing)
-            pm.setRenderHint(QPainter.TextAntialiasing)
+            pm.setRenderHint(QPAINTER_ANTIALIASING)
+            pm.setRenderHint(QPAINTER_TEXT_ANTIALIASING)
 
             scale = self.scale
             margin_x = int(80 * scale)
