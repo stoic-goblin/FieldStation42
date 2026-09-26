@@ -83,17 +83,37 @@ def main() -> int:
     config = _load_config()
     tracker = ChannelStatusTracker()
     had_player = False
+    status_baseline_mtime_ns: int | None = None
     while True:
         player_present = os.path.exists(MPV_SOCKET)
         if not player_present:
             if had_player:
                 tracker.reset()
             had_player = False
+            status_baseline_mtime_ns = None
             time.sleep(POLL_SECONDS)
             continue
         if not had_player:
             tracker.reset()
-        had_player = True
+            try:
+                status_baseline_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
+            except OSError:
+                status_baseline_mtime_ns = None
+            had_player = True
+            time.sleep(POLL_SECONDS)
+            continue
+
+        try:
+            status_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
+        except OSError:
+            time.sleep(POLL_SECONDS)
+            continue
+        if status_baseline_mtime_ns is not None:
+            if status_mtime_ns == status_baseline_mtime_ns:
+                time.sleep(POLL_SECONDS)
+                continue
+            status_baseline_mtime_ns = None
+
         status = read_status(SOCKET_FILE)
         if status is not None:
             text = tracker.changed_text(config, status)
