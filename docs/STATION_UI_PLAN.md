@@ -218,3 +218,19 @@ This is the plan, but it's not set in stone. If you have thoughts on the phasing
 - Are there workflow patterns I'm missing?
 
 Looking forward to getting this built and in your hands.
+
+## Channel-tune OSD direction
+
+A desired couch-facing behavior is an old-fashioned digital channel overlay shown immediately after a successful tune/channel change. The initial presentation should be deliberately minimal and era-appropriate rather than a modern information card, for example:
+
+`CH 13 - CABLE13`
+
+Design intent:
+- pixelated / bitmap-style text with a classic cable-box or CRT-era feel;
+- brief appearance on tune, then clean disappearance without lingering chrome;
+- channel number and network name are the primary payload;
+- no large translucent panel, artwork card, or modern metadata treatment in the baseline behavior;
+- optional richer metadata can be explored later, but should not dilute the fast, legible tune confirmation;
+- implement through the existing FieldStation42 OSD/overlay machinery and channel-change lifecycle where practical rather than inventing an unrelated presentation stack.
+
+This is a product direction, not yet an implementation commitment or finalized visual spec.
