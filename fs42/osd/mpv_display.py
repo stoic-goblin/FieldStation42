@@ -14,6 +14,8 @@ from pathlib import Path
 import socket
 import time
 
+from fs42.runtime_paths import MPV_IPC_SOCKET
+
 from .status_display import (
     CONFIG_FILE_PATH,
     SOCKET_FILE,
@@ -24,7 +26,7 @@ from .status_display import (
     read_status,
 )
 
-MPV_SOCKET = "/tmp/mpvsocket"
+MPV_SOCKET = MPV_IPC_SOCKET
 POLL_SECONDS = 1.0 / 20.0
 
 

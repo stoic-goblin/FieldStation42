@@ -1,6 +1,7 @@
 import unittest
 
-from fs42.osd.mpv_display import mpv_commands
+from fs42.osd.mpv_display import MPV_SOCKET, mpv_commands
+from fs42.runtime_paths import MPV_IPC_SOCKET
 from fs42.osd.status_display import ChannelStatusTracker, StatusDisplayConfig, compact_network_name
 
 
@@ -29,6 +30,11 @@ class TestOsdStatus(unittest.TestCase):
 
     def test_stopped_or_invalid_status_does_not_emit(self):
         self.assertIsNone(self.tracker.changed_text(self.config, {"status": "stopped", "channel_number": -1, "network_name": ""}))
+
+
+    def test_mpv_ipc_uses_shared_runtime_path(self):
+        self.assertEqual(MPV_IPC_SOCKET, "runtime/mpv.socket")
+        self.assertEqual(MPV_SOCKET, MPV_IPC_SOCKET)
 
     def test_mpv_commands_use_short_configured_duration(self):
         config = StatusDisplayConfig(display_time=1.75, font_size=12, expansion_factor=4)

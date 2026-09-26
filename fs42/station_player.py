@@ -12,6 +12,8 @@ import logging
 import time
 from python_mpv_jsonipc import MPV
 
+from fs42.runtime_paths import MPV_IPC_SOCKET
+
 from fs42.guide_tk import guide_channel_runner, GuideCommands
 from fs42.autobump_agent import AutoBumpAgent
 
@@ -163,12 +165,12 @@ class StationPlayer:
 
         if not mpv:
             self._l.info("Starting MPV instance")
-            # command on client: mpv --input-ipc-server=/tmp/mpvsocket --idle --force-window 
+            # command on client: mpv --input-ipc-server=runtime/mpv.socket --idle --force-window 
 
             # if not running on trixie
             self.mpv = MPV(
                 start_mpv=start_it,
-                ipc_socket="/tmp/mpvsocket",
+                ipc_socket=MPV_IPC_SOCKET,
                 input_default_bindings=False,
                 fs=True,
                 idle=True,
