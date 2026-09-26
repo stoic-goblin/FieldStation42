@@ -52,6 +52,19 @@ def _rgba_hex(color: tuple[int, int, int, int]) -> str:
     return f"#{a:02X}{r:02X}{g:02X}{b:02X}"
 
 
+def _mpv_font_name(font: str | None) -> str | None:
+    if not font:
+        return None
+    path = Path(font)
+    if path.is_file():
+        try:
+            from PIL import ImageFont
+            return ImageFont.truetype(path, 12).getname()[0]
+        except OSError:
+            pass
+    return font
+
+
 def mpv_commands(config: StatusDisplayConfig, text: str) -> list[dict[str, object]]:
     align_x = {HAlignment.LEFT: "left", HAlignment.CENTER: "center", HAlignment.RIGHT: "right"}[config.halign]
     align_y = {VAlignment.TOP: "top", VAlignment.CENTER: "center", VAlignment.BOTTOM: "bottom"}[config.valign]
@@ -65,8 +78,8 @@ def mpv_commands(config: StatusDisplayConfig, text: str) -> list[dict[str, objec
         {"command": ["set_property", "osd-margin-x", max(0, round(config.x_margin * 1000))]},
         {"command": ["set_property", "osd-margin-y", max(0, round(config.y_margin * 1000))]},
     ]
-    if config.font:
-        commands.append({"command": ["set_property", "osd-font", config.font]})
+    if font_name := _mpv_font_name(config.font):
+        commands.append({"command": ["set_property", "osd-font", font_name]})
     commands.append({"command": ["show-text", text, max(1, round(config.display_time * 1000))]})
     return commands
 
@@ -83,12 +96,24 @@ def socket_identity(socket_path: str = MPV_SOCKET) -> tuple[int, int] | None:
 
 
 def send_commands(commands: list[dict[str, object]], socket_path: str = MPV_SOCKET) -> None:
-    payload = b"".join((json.dumps(command, separators=(",", ":")) + "\n").encode("utf-8") for command in commands)
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        client.settimeout(0.25)
+        client.settimeout(0.5)
         client.connect(socket_path)
-        client.sendall(payload)
+        with client.makefile("rwb", buffering=0) as stream:
+            for request_id, command in enumerate(commands, start=1):
+                request = dict(command)
+                request["request_id"] = request_id
+                stream.write((json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8"))
+                line = stream.readline()
+                if not line:
+                    raise OSError("mpv IPC closed before acknowledging OSD command")
+                try:
+                    response = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise OSError("mpv IPC returned invalid JSON") from exc
+                if response.get("request_id") != request_id or response.get("error") != "success":
+                    raise OSError(f"mpv rejected OSD command: {response}")
     finally:
         client.close()
 
@@ -109,7 +134,7 @@ def main() -> int:
             status_baseline_mtime_ns = None
             time.sleep(POLL_SECONDS)
             continue
-        if not had_player or current_socket_identity != player_socket_identity:
+        if not had_player:
             tracker.reset()
             try:
                 status_baseline_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
@@ -119,6 +144,13 @@ def main() -> int:
             player_socket_identity = current_socket_identity
             time.sleep(POLL_SECONDS)
             continue
+        if current_socket_identity != player_socket_identity:
+            # python-mpv-jsonipc can replace its startup socket while one FS42
+            # session is coming up. Re-arm the presentation for the new socket,
+            # but keep the original pre-session status baseline so a fresh
+            # status already written during replacement still qualifies.
+            tracker.reset()
+            player_socket_identity = current_socket_identity
 
         try:
             status_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns

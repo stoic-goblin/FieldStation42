@@ -1,9 +1,11 @@
+import json
 import os
 import socket
 import tempfile
+import threading
 import unittest
 
-from fs42.osd.mpv_display import MPV_SOCKET, mpv_commands, socket_identity
+from fs42.osd.mpv_display import MPV_SOCKET, _mpv_font_name, mpv_commands, send_commands, socket_identity
 from fs42.runtime_paths import MPV_IPC_SOCKET
 from fs42.osd.status_display import ChannelStatusTracker, StatusDisplayConfig, compact_network_name
 
@@ -60,6 +62,58 @@ class TestOsdStatus(unittest.TestCase):
                 self.assertNotEqual(first_identity, second_identity)
             finally:
                 second.close()
+
+    def test_mpv_font_name_preserves_family_names(self):
+        self.assertEqual(_mpv_font_name("Noto Mono"), "Noto Mono")
+
+    def test_send_commands_requires_successful_mpv_acknowledgements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mpv.socket")
+            received = []
+            ready = threading.Event()
+
+            def server():
+                listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                listener.bind(path)
+                listener.listen(1)
+                ready.set()
+                conn, _ = listener.accept()
+                with conn, conn.makefile("rwb", buffering=0) as stream:
+                    for _ in range(2):
+                        request = json.loads(stream.readline())
+                        received.append(request)
+                        stream.write((json.dumps({"request_id": request["request_id"], "error": "success"}) + "\n").encode())
+                listener.close()
+
+            thread = threading.Thread(target=server)
+            thread.start()
+            self.assertTrue(ready.wait(1))
+            send_commands([{"command": ["set_property", "osd-font-size", 48]}, {"command": ["show-text", "CH 13", 1750]}], path)
+            thread.join(1)
+            self.assertEqual([item["request_id"] for item in received], [1, 2])
+
+    def test_send_commands_rejects_mpv_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mpv.socket")
+            ready = threading.Event()
+
+            def server():
+                listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                listener.bind(path)
+                listener.listen(1)
+                ready.set()
+                conn, _ = listener.accept()
+                with conn, conn.makefile("rwb", buffering=0) as stream:
+                    request = json.loads(stream.readline())
+                    stream.write((json.dumps({"request_id": request["request_id"], "error": "property unavailable"}) + "\n").encode())
+                listener.close()
+
+            thread = threading.Thread(target=server)
+            thread.start()
+            self.assertTrue(ready.wait(1))
+            with self.assertRaises(OSError):
+                send_commands([{"command": ["set_property", "osd-font-size", 48]}], path)
+            thread.join(1)
 
     def test_mpv_commands_use_short_configured_duration(self):
         config = StatusDisplayConfig(display_time=1.75, font_size=12, expansion_factor=4)
