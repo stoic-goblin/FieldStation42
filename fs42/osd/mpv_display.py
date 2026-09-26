@@ -29,6 +29,7 @@ from .status_display import (
 
 MPV_SOCKET = MPV_IPC_SOCKET
 POLL_SECONDS = 1.0 / 20.0
+SOCKET_STABLE_SECONDS = 0.25
 
 
 def _load_config(path: Path = CONFIG_FILE_PATH) -> StatusDisplayConfig:
@@ -123,6 +124,7 @@ def main() -> int:
     tracker = ChannelStatusTracker()
     had_player = False
     player_socket_identity: tuple[int, int] | None = None
+    socket_stable_since: float | None = None
     status_baseline_mtime_ns: int | None = None
     while True:
         current_socket_identity = socket_identity()
@@ -131,6 +133,7 @@ def main() -> int:
                 tracker.reset()
             had_player = False
             player_socket_identity = None
+            socket_stable_since = None
             status_baseline_mtime_ns = None
             time.sleep(POLL_SECONDS)
             continue
@@ -142,6 +145,7 @@ def main() -> int:
                 status_baseline_mtime_ns = None
             had_player = True
             player_socket_identity = current_socket_identity
+            socket_stable_since = time.monotonic()
             time.sleep(POLL_SECONDS)
             continue
         if current_socket_identity != player_socket_identity:
@@ -151,6 +155,13 @@ def main() -> int:
             # status already written during replacement still qualifies.
             tracker.reset()
             player_socket_identity = current_socket_identity
+            socket_stable_since = time.monotonic()
+            time.sleep(POLL_SECONDS)
+            continue
+
+        if socket_stable_since is None or time.monotonic() - socket_stable_since < SOCKET_STABLE_SECONDS:
+            time.sleep(POLL_SECONDS)
+            continue
 
         try:
             status_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
@@ -170,10 +181,12 @@ def main() -> int:
                 try:
                     send_commands(mpv_commands(config, text))
                 except OSError:
-                    # mpv can replace its IPC socket during startup/teardown.
+                    # mpv can replace its IPC socket between stat() and connect().
+                    # Keep the current FS42 session baseline so a fresh status
+                    # already written during startup is not lost on retry.
                     tracker.reset()
-                    had_player = False
                     player_socket_identity = None
+                    socket_stable_since = None
                 else:
                     print(f"fs42-osd: displayed {text}", flush=True)
         time.sleep(POLL_SECONDS)

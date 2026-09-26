@@ -5,7 +5,7 @@ import tempfile
 import threading
 import unittest
 
-from fs42.osd.mpv_display import MPV_SOCKET, _mpv_font_name, mpv_commands, send_commands, socket_identity
+from fs42.osd.mpv_display import MPV_SOCKET, SOCKET_STABLE_SECONDS, _mpv_font_name, mpv_commands, send_commands, socket_identity
 from fs42.runtime_paths import MPV_IPC_SOCKET
 from fs42.osd.status_display import ChannelStatusTracker, StatusDisplayConfig, compact_network_name
 
@@ -41,6 +41,10 @@ class TestOsdStatus(unittest.TestCase):
         self.assertEqual(MPV_IPC_SOCKET, "runtime/mpv.socket")
         self.assertEqual(MPV_SOCKET, MPV_IPC_SOCKET)
 
+
+    def test_mpv_socket_stability_gate_is_bounded(self):
+        self.assertGreater(SOCKET_STABLE_SECONDS, 0)
+        self.assertLessEqual(SOCKET_STABLE_SECONDS, 0.5)
 
     def test_mpv_socket_identity_changes_when_stale_path_is_replaced(self):
         with tempfile.TemporaryDirectory() as tmp:
