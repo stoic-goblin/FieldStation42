@@ -1,9 +1,6 @@
-import json
 import sys
 from pathlib import Path
 import glfw
-from pydantic import BaseModel
-from enum import Enum
 
 from render import Text, create_window, clear_screen
 from logo_display import LogoDisplay, LogoDisplayConfig
@@ -19,35 +16,15 @@ from fs42.osd.content_classifier import (
     classify_current_content,
 )
 
-SOCKET_FILE = "runtime/play_status.socket"
-CONFIG_FILE_PATH = Path("osd/osd.json")
-
-
-class HAlignment(Enum):
-    LEFT = "LEFT"
-    RIGHT = "RIGHT"
-    CENTER = "CENTER"
-
-
-class VAlignment(Enum):
-    TOP = "TOP"
-    BOTTOM = "BOTTOM"
-    CENTER = "CENTER"
-
-
-class StatusDisplayConfig(BaseModel):
-    display_time: float = 2.0
-    halign: HAlignment = HAlignment.LEFT
-    valign: VAlignment = VAlignment.TOP
-    format_text: str = "{channel_number} - {network_name}"
-    text_color: tuple[int, int, int, int] = (0, 255, 0, 200)
-    font_size: int = 40
-    expansion_factor: float = 1.0
-    font: str | None = None
-    x_margin: float = 0.1
-    y_margin: float = 0.1
-    delay: float = 0.0
-
+from fs42.osd.status_display import (
+    CONFIG_FILE_PATH,
+    SOCKET_FILE,
+    ChannelStatusTracker,
+    HAlignment,
+    StatusDisplayConfig,
+    VAlignment,
+    read_status,
+)
 
 class StatusDisplay(object):
     def __init__(self, window, config: StatusDisplayConfig):
@@ -64,29 +41,18 @@ class StatusDisplay(object):
         )
 
         self.time_since_change = 0
-        self.last_status = None  # Track the last status to detect changes
+        self._tracker = ChannelStatusTracker()
 
         self.check_status()
 
     def check_status(self, socket_file=SOCKET_FILE):
-        with open(socket_file, "r") as f:
-            status = f.read()
-            try:
-                status = json.loads(status)
-            except:
-                print(f"Unable to parse player status, {status}")
-
-            else:
-                # Check if status field changed (e.g., from "stopped" to "playing")
-                status_changed = self.last_status is None or status.get("status") != self.last_status.get("status")
-                self.last_status = status
-
-                new_string = self.config.format_text.format(**status)
-                # Reset timer if text changed OR if status changed (like stopped->playing)
-                if new_string != self._text.string or status_changed:
-                    self.time_since_change = -self.config.delay
-                    if new_string:
-                        self._text.string = new_string
+        status = read_status(socket_file)
+        if status is None:
+            return
+        new_string = self._tracker.changed_text(self.config, status)
+        if new_string:
+            self.time_since_change = -self.config.delay
+            self._text.string = new_string
 
     def update(self, dt):
         self.time_since_change += dt
