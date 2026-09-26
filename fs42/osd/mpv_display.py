@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import time
 
 from fs42.runtime_paths import MPV_IPC_SOCKET
@@ -70,6 +71,17 @@ def mpv_commands(config: StatusDisplayConfig, text: str) -> list[dict[str, objec
     return commands
 
 
+def socket_identity(socket_path: str = MPV_SOCKET) -> tuple[int, int] | None:
+    """Return a stable identity for the currently bound mpv Unix socket path."""
+    try:
+        value = os.stat(socket_path)
+    except OSError:
+        return None
+    if not stat.S_ISSOCK(value.st_mode):
+        return None
+    return (value.st_dev, value.st_ino)
+
+
 def send_commands(commands: list[dict[str, object]], socket_path: str = MPV_SOCKET) -> None:
     payload = b"".join((json.dumps(command, separators=(",", ":")) + "\n").encode("utf-8") for command in commands)
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -85,23 +97,26 @@ def main() -> int:
     config = _load_config()
     tracker = ChannelStatusTracker()
     had_player = False
+    player_socket_identity: tuple[int, int] | None = None
     status_baseline_mtime_ns: int | None = None
     while True:
-        player_present = os.path.exists(MPV_SOCKET)
-        if not player_present:
+        current_socket_identity = socket_identity()
+        if current_socket_identity is None:
             if had_player:
                 tracker.reset()
             had_player = False
+            player_socket_identity = None
             status_baseline_mtime_ns = None
             time.sleep(POLL_SECONDS)
             continue
-        if not had_player:
+        if not had_player or current_socket_identity != player_socket_identity:
             tracker.reset()
             try:
                 status_baseline_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
             except OSError:
                 status_baseline_mtime_ns = None
             had_player = True
+            player_socket_identity = current_socket_identity
             time.sleep(POLL_SECONDS)
             continue
 
@@ -126,6 +141,7 @@ def main() -> int:
                     # mpv can replace its IPC socket during startup/teardown.
                     tracker.reset()
                     had_player = False
+                    player_socket_identity = None
                 else:
                     print(f"fs42-osd: displayed {text}", flush=True)
         time.sleep(POLL_SECONDS)

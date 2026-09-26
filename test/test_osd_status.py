@@ -1,6 +1,9 @@
+import os
+import socket
+import tempfile
 import unittest
 
-from fs42.osd.mpv_display import MPV_SOCKET, mpv_commands
+from fs42.osd.mpv_display import MPV_SOCKET, mpv_commands, socket_identity
 from fs42.runtime_paths import MPV_IPC_SOCKET
 from fs42.osd.status_display import ChannelStatusTracker, StatusDisplayConfig, compact_network_name
 
@@ -35,6 +38,28 @@ class TestOsdStatus(unittest.TestCase):
     def test_mpv_ipc_uses_shared_runtime_path(self):
         self.assertEqual(MPV_IPC_SOCKET, "runtime/mpv.socket")
         self.assertEqual(MPV_SOCKET, MPV_IPC_SOCKET)
+
+
+    def test_mpv_socket_identity_changes_when_stale_path_is_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mpv.socket")
+            first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            first.bind(path)
+            first_identity = socket_identity(path)
+            self.assertIsNotNone(first_identity)
+            first.close()
+
+            # Unix socket paths can survive process/socket teardown. A new mpv
+            # session unlinks and binds a new socket at the same pathname.
+            os.unlink(path)
+            second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                second.bind(path)
+                second_identity = socket_identity(path)
+                self.assertIsNotNone(second_identity)
+                self.assertNotEqual(first_identity, second_identity)
+            finally:
+                second.close()
 
     def test_mpv_commands_use_short_configured_duration(self):
         config = StatusDisplayConfig(display_time=1.75, font_size=12, expansion_factor=4)
