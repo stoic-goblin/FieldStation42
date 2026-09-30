@@ -392,7 +392,7 @@ class MediaProcessor:
         return break_points
 
     @staticmethod
-    def segments_from_black_midpoints(midpoints, content_duration, min_segment_duration=timings.MIN_1):
+    def segments_from_break_boundaries(boundaries_in, content_duration, min_segment_duration=timings.MIN_1):
         """Convert black-frame midpoints into contiguous content segments.
 
         Short segments are removed by dropping a boundary and merging the media
@@ -401,7 +401,7 @@ class MediaProcessor:
         content_duration = float(content_duration)
         boundaries = [0.0]
         boundaries.extend(sorted({
-            float(point) for point in midpoints
+            float(point) for point in boundaries_in
             if 0.0 < float(point) < content_duration
         }))
         boundaries.append(content_duration)
@@ -478,7 +478,7 @@ class MediaProcessor:
                 if midpoint > timings.MIN_1 and midpoint < base_duration - timings.MIN_1:
                     trimmed_midpoints.append(midpoint)
 
-            return MediaProcessor.segments_from_black_midpoints(
+            return MediaProcessor.segments_from_break_boundaries(
                 trimmed_midpoints, base_duration, timings.MIN_1
             )
 

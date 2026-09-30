@@ -17,7 +17,7 @@ class ReelCutter:
         if reel_blocks:
             break_count = len(reel_blocks)
 
-        if break_count <= 1 or break_strategy == "end" or break_strategy == "center":
+        if break_count == 0 or break_strategy == "end" or break_strategy == "center":
             if break_strategy == "center":
                 h_dur = base_duration/2
                 h1 = BlockPlanEntry(base_clip.path, base_offset, h_dur, content_type=base_clip.content_type, media_type=base_clip.media_type)

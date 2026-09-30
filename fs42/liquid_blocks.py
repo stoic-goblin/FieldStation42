@@ -56,53 +56,64 @@ class LiquidBlock:
 
     @staticmethod
     def clip_break_points(break_points, max_breaks, content_duration):
-        # ensure start ordering
-        break_points = MediaProcessor.calc_black_segments(break_points, content_duration)
+        # Convert chapter/black-point starts into contiguous candidate acts and
+        # reject tiny intro/credit/transition acts before choosing break slots.
+        boundaries = [
+            point["chapter_start"]
+            for point in break_points
+            if point.get("chapter_start", 0) > 0
+        ]
+        break_points = MediaProcessor.segments_from_break_boundaries(
+            boundaries, content_duration, timings.MIN_3
+        )
 
-        # Handle edge cases
         if max_breaks <= 0 or len(break_points) == 0:
             return []
 
+        max_breaks = int(max_breaks)
         if len(break_points) <= max_breaks:
             return break_points
 
-        # Merge adjacent chapters to create evenly-distributed segments
-        # This ensures no content is skipped, just fewer commercial breaks
-        max_breaks = int(max_breaks)
+        # Pick chapter/black boundaries closest to evenly spaced points in the
+        # program timeline. Candidate-index spacing can cluster multiple breaks
+        # together when a show contains several fades near one scene transition.
+        cut_count = max_breaks - 1
+        candidates = [segment["chapter_start"] for segment in break_points[1:]]
+        targets = [content_duration * i / max_breaks for i in range(1, max_breaks)]
 
-        # Calculate which chapter boundaries to keep as break insertion points
-        # For max_breaks segments, we need (max_breaks - 1) commercial breaks
-        num_breaks = max_breaks - 1
+        # Dynamic programming chooses an ordered subset of candidate boundaries
+        # minimizing total distance from the ideal timeline positions.
+        inf = float("inf")
+        costs = [[inf] * (cut_count + 1) for _ in range(len(candidates) + 1)]
+        previous = [[None] * (cut_count + 1) for _ in range(len(candidates) + 1)]
+        for i in range(len(candidates) + 1):
+            costs[i][0] = 0.0
 
-        # Select evenly-distributed break positions
-        step = (len(break_points) - 1) / num_breaks if num_breaks > 0 else 0
-        break_indices = []
-        for i in range(1, max_breaks):  # Start from 1, not 0 (skip the first chapter start)
-            index = round(i * step)
-            if index not in break_indices and index < len(break_points):
-                break_indices.append(index)
+        for i, candidate in enumerate(candidates, start=1):
+            upper = min(i, cut_count)
+            for chosen in range(1, upper + 1):
+                skip_cost = costs[i - 1][chosen]
+                take_cost = costs[i - 1][chosen - 1] + abs(candidate - targets[chosen - 1])
+                if take_cost < skip_cost:
+                    costs[i][chosen] = take_cost
+                    previous[i][chosen] = True
+                else:
+                    costs[i][chosen] = skip_cost
+                    previous[i][chosen] = False
 
-        # Create merged segments by combining chapters between selected break points
-        merged_segments = []
-        segment_start_idx = 0
+        selected = []
+        i = len(candidates)
+        chosen = cut_count
+        while chosen > 0 and i > 0:
+            if previous[i][chosen]:
+                selected.append(candidates[i - 1])
+                chosen -= 1
+            i -= 1
+        selected.reverse()
 
-        for break_idx in break_indices:
-            # Merge all chapters from segment_start_idx to break_idx into one segment
-            merged_segment = {
-                "chapter_start": break_points[segment_start_idx]["chapter_start"],
-                "chapter_end": break_points[break_idx]["chapter_start"],
-            }
-            merged_segments.append(merged_segment)
-            segment_start_idx = break_idx
-
-        # Add the final segment (from last break to end)
-        final_segment = {
-            "chapter_start": break_points[segment_start_idx]["chapter_start"],
-            "chapter_end": break_points[-1]["chapter_end"],
-        }
-        merged_segments.append(final_segment)
-
-        return merged_segments
+        return MediaProcessor.segments_from_break_boundaries(
+            selected, content_duration, timings.MIN_3
+        )
 
     def make_plan(self, catalog):
         # first, collect any reels (commercials and bumps) we might need to buffer to the requested duration
