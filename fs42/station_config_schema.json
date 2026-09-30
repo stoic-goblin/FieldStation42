@@ -104,6 +104,10 @@
           "type": "number",
           "description": "MPV panscan value (e.g., 1.0) to fill screen by cropping edges"
         },
+        "loudness_gain_map": {
+          "type": "string",
+          "description": "Path to a JSON map of canonical local media paths to fixed playback gain in dB"
+        },
         "media_filter": {
           "type": "string",
           "enum": ["video", "audio", "mixed"],

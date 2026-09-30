@@ -13,6 +13,7 @@ import time
 from python_mpv_jsonipc import MPV
 
 from fs42.runtime_paths import MPV_IPC_SOCKET
+from fs42.loudness_gain import LoudnessGainMap, volume_filter_db
 
 from fs42.guide_tk import guide_channel_runner, GuideCommands
 from fs42.autobump_agent import AutoBumpAgent
@@ -192,6 +193,8 @@ class StationPlayer:
         self.now_playing_process = None
         self.schedule_lock = None
         self._active_afx = None
+        self._active_loudness_afx = None
+        self._loudness_gain_map = LoudnessGainMap.from_station_config(station_config, self._l)
 
     def load_up(self):
         start_time = time.perf_counter()
@@ -340,6 +343,7 @@ class StationPlayer:
                     self.mpv.keepaspect = True
 
                 self._apply_vfx(datetime.datetime.now())
+                self._apply_loudness_gain(file_path)
 
                 # self.mpv.vf = "lavfi=[]"
                 self._l.info(f"playing {file_path}")
@@ -413,6 +417,7 @@ class StationPlayer:
         self._close_now_playing()
         self.mpv.vf = ""
         self.mpv.af = ""
+        self._active_loudness_afx = None
         self.mpv.command("playlist-clear")
         self.mpv.command("loadfile", file_path, "replace")
         self.mpv.loop_playlist = "inf"
@@ -471,6 +476,26 @@ class StationPlayer:
             self._l.exception(e)
             self._l.error(f"Error starting playlist: {e}")
             return False
+
+    def _apply_loudness_gain(self, file_path):
+        """Replace the previous per-item fixed-gain filter for this media item."""
+        if self._active_loudness_afx:
+            try:
+                self.mpv.command("af", "remove", self._active_loudness_afx)
+            except Exception as exc:
+                self._l.warning("Could not remove previous loudness gain filter: %s", exc)
+            finally:
+                self._active_loudness_afx = None
+
+        gain_db = self._loudness_gain_map.gain_for(file_path)
+        new_filter = volume_filter_db(gain_db)
+        if new_filter:
+            try:
+                self.mpv.command("af", "add", new_filter)
+                self._active_loudness_afx = new_filter
+                self._l.info("Applying fixed loudness gain %.2f dB to %s", gain_db, file_path)
+            except Exception as exc:
+                self._l.warning("Could not apply loudness gain %.2f dB to %s: %s", gain_db, file_path, exc)
 
     def _apply_vfx(self, current_time):
         vfx = None
