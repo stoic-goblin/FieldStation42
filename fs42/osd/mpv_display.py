@@ -17,6 +17,9 @@ import time
 
 from fs42.runtime_paths import MPV_IPC_SOCKET
 
+from .mpv_logo import LogoOverlayController, load_logo_frames, logo_geometry, overlay_add_command
+from fs42.station_manager import StationManager
+
 from .status_display import (
     CONFIG_FILE_PATH,
     SOCKET_FILE,
@@ -30,6 +33,9 @@ from .status_display import (
 MPV_SOCKET = MPV_IPC_SOCKET
 POLL_SECONDS = 1.0 / 20.0
 SOCKET_STABLE_SECONDS = 0.25
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOGO_OVERLAY_ID = 31
+LOGO_FRAME_FILE = Path(os.environ.get("FS42_OSD_LOGO_FRAME", "/run/fs42-osd/logo.bgra"))
 
 
 def _load_config(path: Path = CONFIG_FILE_PATH) -> StatusDisplayConfig:
@@ -96,8 +102,9 @@ def socket_identity(socket_path: str = MPV_SOCKET) -> tuple[int, int] | None:
     return (value.st_dev, value.st_ino)
 
 
-def send_commands(commands: list[dict[str, object]], socket_path: str = MPV_SOCKET) -> None:
+def send_commands(commands: list[dict[str, object]], socket_path: str = MPV_SOCKET) -> list[dict[str, object]]:
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    responses: list[dict[str, object]] = []
     try:
         client.settimeout(0.5)
         client.connect(socket_path)
@@ -115,13 +122,120 @@ def send_commands(commands: list[dict[str, object]], socket_path: str = MPV_SOCK
                     raise OSError("mpv IPC returned invalid JSON") from exc
                 if response.get("request_id") != request_id or response.get("error") != "success":
                     raise OSError(f"mpv rejected OSD command: {response}")
+                responses.append(response)
     finally:
         client.close()
+    return responses
+
+
+def mpv_geometry(socket_path: str = MPV_SOCKET) -> tuple[int, int] | None:
+    responses = send_commands(
+        [
+            {"command": ["get_property", "osd-width"]},
+            {"command": ["get_property", "osd-height"]},
+        ],
+        socket_path=socket_path,
+    )
+    try:
+        width = int(responses[0]["data"])
+        height = int(responses[1]["data"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return (width, height)
+
+
+class MpvLogoRenderer:
+    """Render the existing station-logo configuration through mpv overlay-add."""
+
+    def __init__(self, frame_file: Path = LOGO_FRAME_FILE) -> None:
+        manager = StationManager()
+        self.controller = LogoOverlayController(PROJECT_ROOT, manager.station_by_name)
+        self.frame_file = frame_file
+        self.frames = []
+        self.geometry = None
+        self.logo_path: Path | None = None
+        self.frame_index: int | None = None
+        self.frame_started_at = 0.0
+        self.visible = False
+
+    def reset_remote(self) -> None:
+        self.controller.reset_remote()
+        self.frames = []
+        self.geometry = None
+        self.logo_path = None
+        self.frame_index = None
+        self.frame_started_at = 0.0
+        self.visible = False
+
+    def _remove(self) -> None:
+        if not self.visible:
+            return
+        send_commands([{"command": ["overlay-remove", LOGO_OVERLAY_ID]}])
+        self.visible = False
+        self.frame_index = None
+
+    def _load(self, now: float) -> bool:
+        station = self.controller.station
+        logo_path = self.controller.logo_path
+        if not station or not logo_path:
+            return False
+        geometry_value = mpv_geometry()
+        if geometry_value is None:
+            return False
+        self.geometry = logo_geometry(station, *geometry_value)
+        self.frames = load_logo_frames(
+            logo_path, self.geometry, float(station.get("logo_alpha", 1.0))
+        )
+        self.logo_path = logo_path
+        self.frame_index = None
+        self.frame_started_at = now
+        return bool(self.frames)
+
+    def _display_frame(self, index: int) -> None:
+        if not self.geometry or not self.frames:
+            return
+        frame = self.frames[index]
+        self.frame_file.parent.mkdir(parents=True, exist_ok=True)
+        self.frame_file.write_bytes(frame.bgra)
+        g = self.geometry
+        send_commands([overlay_add_command(self.frame_file, g)])
+        self.visible = True
+        self.frame_index = index
+
+    def update(self, status: dict, now: float) -> None:
+        show, restarted = self.controller.update(status, now)
+        if not show:
+            self._remove()
+            return
+
+        if restarted or self.logo_path != self.controller.logo_path or not self.frames:
+            self._remove()
+            if not self._load(now):
+                return
+
+        elapsed = max(0.0, now - self.frame_started_at)
+        total = sum(frame.duration for frame in self.frames)
+        if total <= 0:
+            index = 0
+        else:
+            cursor = elapsed % total
+            index = len(self.frames) - 1
+            acc = 0.0
+            for candidate, frame in enumerate(self.frames):
+                acc += frame.duration
+                if cursor < acc:
+                    index = candidate
+                    break
+        if index != self.frame_index:
+            self._display_frame(index)
 
 
 def main() -> int:
     config = _load_config()
     tracker = ChannelStatusTracker()
+    logo = MpvLogoRenderer()
     had_player = False
     player_socket_identity: tuple[int, int] | None = None
     socket_stable_since: float | None = None
@@ -131,6 +245,7 @@ def main() -> int:
         if current_socket_identity is None:
             if had_player:
                 tracker.reset()
+                logo.reset_remote()
             had_player = False
             player_socket_identity = None
             socket_stable_since = None
@@ -139,6 +254,7 @@ def main() -> int:
             continue
         if not had_player:
             tracker.reset()
+            logo.reset_remote()
             try:
                 status_baseline_mtime_ns = os.stat(SOCKET_FILE).st_mtime_ns
             except OSError:
@@ -154,6 +270,7 @@ def main() -> int:
             # but keep the original pre-session status baseline so a fresh
             # status already written during replacement still qualifies.
             tracker.reset()
+            logo.reset_remote()
             player_socket_identity = current_socket_identity
             socket_stable_since = time.monotonic()
             time.sleep(POLL_SECONDS)
@@ -176,6 +293,11 @@ def main() -> int:
 
         status = read_status(SOCKET_FILE)
         if status is not None:
+            try:
+                logo.update(status, time.monotonic())
+            except (OSError, ValueError):
+                # mpv can replace its socket while an overlay command is in flight.
+                logo.reset_remote()
             text = tracker.changed_text(config, status)
             if text:
                 try:
