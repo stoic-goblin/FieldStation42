@@ -62,7 +62,7 @@ class MpvOsdLogoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "bug.gif"
             a = Image.new("RGBA", (2, 2), (255, 255, 255, 255))
-            b = Image.new("RGBA", (2, 2), (255, 255, 255, 0))
+            b = Image.new("RGBA", (2, 2), (64, 128, 255, 192))
             a.save(path, save_all=True, append_images=[b], duration=[100, 200], loop=0, disposal=2)
             g = logo_geometry({"logo_width": 0.5, "logo_height": 0.5}, 4, 4)
             frames = load_logo_frames(path, g, 0.5)
