@@ -392,16 +392,42 @@ class MediaProcessor:
         return break_points
 
     @staticmethod
+    def segments_from_black_midpoints(midpoints, content_duration, min_segment_duration=timings.MIN_1):
+        """Convert black-frame midpoints into contiguous content segments.
+
+        Short segments are removed by dropping a boundary and merging the media
+        into an adjacent segment. No media interval is ever discarded.
+        """
+        content_duration = float(content_duration)
+        boundaries = [0.0]
+        boundaries.extend(sorted({
+            float(point) for point in midpoints
+            if 0.0 < float(point) < content_duration
+        }))
+        boundaries.append(content_duration)
+
+        while len(boundaries) > 2:
+            durations = [boundaries[i + 1] - boundaries[i] for i in range(len(boundaries) - 1)]
+            shortest_index = min(range(len(durations)), key=durations.__getitem__)
+            if durations[shortest_index] >= min_segment_duration:
+                break
+
+            # Merge a short segment forward when possible. For the final segment,
+            # merge backward by dropping its leading boundary.
+            boundary_index = shortest_index if shortest_index == len(durations) - 1 else shortest_index + 1
+            del boundaries[boundary_index]
+
+        return [
+            {
+                "chapter_start": boundaries[i],
+                "chapter_end": boundaries[i + 1],
+                "segment_duration": boundaries[i + 1] - boundaries[i],
+            }
+            for i in range(len(boundaries) - 1)
+        ] if len(boundaries) > 2 else []
+
+    @staticmethod
     def black_detect(fname, base_duration, black_min_duration=0.1, black_pixel_tresh=0.1, black_ratio_thresh=0.95):
-        def min_segment(break_points):
-            spx = sorted(break_points, key=lambda x: x["segment_duration"])
-            return spx[0]["segment_duration"]
-
-        def remove_min(break_points):
-            spx = sorted(break_points, key=lambda x: x["segment_duration"])
-            del spx[0]
-            return spx
-
         _l = logging.getLogger("MEDIA")
         _l.info(f"Detecting black frames in {fname}")
 
@@ -452,30 +478,9 @@ class MediaProcessor:
                 if midpoint > timings.MIN_1 and midpoint < base_duration - timings.MIN_1:
                     trimmed_midpoints.append(midpoint)
 
-            # Convert midpoints to segment format: each segment goes from previous break to current break
-            segments = []
-            prev_point = 0
-            for midpoint in trimmed_midpoints:
-                segments.append({
-                    "chapter_start": prev_point,
-                    "chapter_end": midpoint,
-                })
-                prev_point = midpoint
-
-            # Add final segment from last break to end of content
-            if trimmed_midpoints:
-                segments.append({
-                    "chapter_start": prev_point,
-                    "chapter_end": base_duration,
-                })
-
-            segmented = MediaProcessor.calc_black_segments(segments, base_duration)
-
-            while min_segment(segmented) < timings.MIN_1 and len(segmented) > 1:
-                segmented = remove_min(segmented)
-                segmented = MediaProcessor.calc_black_segments(segmented, base_duration)
-
-            return segmented
+            return MediaProcessor.segments_from_black_midpoints(
+                trimmed_midpoints, base_duration, timings.MIN_1
+            )
 
         except Exception as e:
             _l.error(f"FFmpeg hit an error detecting black frames in {fname}")
