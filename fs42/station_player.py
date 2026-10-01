@@ -2,6 +2,7 @@ from enum import Enum
 import logging
 
 import multiprocessing
+import subprocess
 import time
 import datetime
 import json
@@ -158,27 +159,11 @@ class StationPlayer:
 
     def __init__(self, station_config, input_check_fn, mpv=None):
         self._l = logging.getLogger("FieldPlayer")
-
-        start_it = True
-
-        if "start_mpv" in StationManager().server_conf:
-            start_it = StationManager().server_conf["start_mpv"]
-
-        if not mpv:
-            self._l.info("Starting MPV instance")
-            # command on client: mpv --input-ipc-server=runtime/mpv.socket --idle --force-window 
-
-            # if not running on trixie
-            self.mpv = MPV(
-                start_mpv=start_it,
-                ipc_socket=MPV_IPC_SOCKET,
-                input_default_bindings=False,
-                fs=True,
-                idle=True,
-                force_window=True,
-                script_opts="osc-idlescreen=no",
-                hr_seek="yes",
-            )
+        self._start_mpv_enabled = StationManager().server_conf.get("start_mpv", True)
+        self._shutting_down = False
+        self.mpv = mpv
+        if self.mpv is None:
+            self._start_mpv()
 
         self.station_config = station_config
         # self.playlist = self.read_json(runtime_filepath)
@@ -195,6 +180,63 @@ class StationPlayer:
         self._active_afx = None
         self._active_loudness_afx = None
         self._loudness_gain_map = LoudnessGainMap.from_station_config(station_config, self._l)
+
+    def _start_mpv(self):
+        """Start the station-owned mpv process if it is not already running."""
+        if self.mpv is not None or self._shutting_down:
+            return
+        self._l.info("Starting MPV instance")
+        self.mpv = MPV(
+            start_mpv=self._start_mpv_enabled,
+            ipc_socket=MPV_IPC_SOCKET,
+            input_default_bindings=False,
+            fs=True,
+            idle=True,
+            force_window=True,
+            script_opts="osc-idlescreen=no",
+            hr_seek="yes",
+        )
+
+    def _release_mpv(self, timeout=2.0):
+        """Fully stop mpv and wait for it to relinquish DRM before a web channel.
+
+        ``mpv.stop()`` only stops media playback; an idle mpv process still owns
+        the DRM master on direct-display appliances.  python-mpv-jsonipc's
+        terminate() sends SIGTERM but does not wait for the child process, so we
+        explicitly wait (and kill on timeout) before starting another renderer.
+        """
+        if self.mpv is None:
+            return
+        wrapper = self.mpv
+        process = getattr(getattr(wrapper, "mpv_process", None), "process", None)
+        self._l.info("Releasing MPV for blocking web channel")
+        wrapper.terminate()
+        if process is not None and hasattr(process, "poll") and process.poll() is None:
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._l.warning("MPV did not exit after %.1fs; killing it before web handoff", timeout)
+                process.kill()
+                process.wait(timeout=1.0)
+        self.mpv = None
+
+    def _stop_web_process(self):
+        if self.web_process is None:
+            self.web_queue = None
+            return
+        try:
+            if self.web_queue is not None and self.web_process.is_alive():
+                self.web_queue.put("hide_window")
+            self.web_process.join(timeout=3)
+            if self.web_process.is_alive():
+                self._l.warning("Web process did not terminate gracefully, forcing termination")
+                self.web_process.terminate()
+                self.web_process.join(timeout=1)
+        except Exception as exc:
+            self._l.error("Error shutting down web process: %s", exc)
+        finally:
+            self.web_process = None
+            self.web_queue = None
 
     def load_up(self):
         start_time = time.perf_counter()
@@ -240,33 +282,17 @@ class StationPlayer:
             self._l.error(f"Failed to start Now Playing overlay: {e}")
 
     def shutdown(self):
+        self._shutting_down = True
         self.current_playing_file_path = None
-        # Terminate any running web process
-        if self.web_process and self.web_process.is_alive():
-            self._l.info("Terminating web process")
-            try:
-                if self.web_queue:
-                    self.web_queue.put("hide_window")
-                self.web_process.join(timeout=2)
-            except Exception:
-                pass
-
-            # Check if process is still alive and has valid _popen
-            if self.web_process and hasattr(self.web_process, '_popen') and self.web_process._popen and self.web_process.is_alive():
-                try:
-                    self.web_process.terminate()
-                    self.web_process.join(timeout=1)
-                except Exception:
-                    pass
-
-        self.web_process = None
-        self.web_queue = None
+        self._l.info("Terminating web process")
+        self._stop_web_process()
 
         # Terminate any running now playing overlay
         self._l.info("Terminating now playing overlay")
         self._close_now_playing()
 
-        self.mpv.terminate()
+        if self.mpv is not None:
+            self._release_mpv()
 
     def update_filters(self):
         self.mpv.vf = self.reception.filter()
@@ -637,80 +663,67 @@ class StationPlayer:
             msg = "Web rendering requires a supported Qt WebEngine backend. Please check documentation."
             return PlayerOutcome(PlayerState.EXIT_COMMAND, msg)
 
-        # create the pipe to communicate with the web channel
+        # A top-level web station is a fullscreen renderer, not an mpv overlay.
+        # On direct-DRM systems an idle mpv still owns DRM master, so release it
+        # *before* the Qt process starts. Non-blocking web clips keep historical
+        # behavior because their caller still expects the active mpv object.
+        released_mpv = False
+        if blocking:
+            self._close_now_playing()
+            self._release_mpv()
+            released_mpv = True
+        elif self.mpv is not None:
+            self.mpv.stop()
+
+        self.current_playing_file_path = None
         self.web_queue = multiprocessing.Queue()
         self.web_process = multiprocessing.Process(
             target=web_render_runner,
-            args=(
-                web_config,
-                self.web_queue,
-            ),
-        )
-        self.web_process.start()
-
-        # Stop any currently playing content
-        self.mpv.stop()
-        self.current_playing_file_path = None
-
-        # update status
-        update_status_socket(
-            "playing",
-            self.station_config["network_name"],
-            self.station_config["channel_number"],
-            self.station_config["network_name"],
-            timestamp=StationManager().server_conf["date_time_format"],
-            content_type="web",
+            args=(web_config, self.web_queue),
         )
 
-        if not blocking:
-            return PlayerOutcome(PlayerState.SUCCESS)
+        try:
+            self.web_process.start()
 
-        # Check if duration is specified for auto-bumps
-        duration = web_config.get("duration")
-        stop_time = None
-        if duration:
-            stop_time = datetime.datetime.now() + datetime.timedelta(seconds=duration)
-            self._l.info(f"Web content will auto-stop after {duration} seconds")
+            update_status_socket(
+                "playing",
+                self.station_config["network_name"],
+                self.station_config["channel_number"],
+                self.station_config["network_name"],
+                timestamp=StationManager().server_conf["date_time_format"],
+                content_type="web",
+            )
 
-        keep_going = True
-        while keep_going:
-            time.sleep(0.05)
-
-            # Check if duration has expired
-            if stop_time and datetime.datetime.now() >= stop_time:
-                self._l.info("Web content duration expired, shutting down")
-                try:
-                    self.web_queue.put("hide_window")
-                    self._l.info("Sent hide_window message to web process")
-                    self.web_process.join(timeout=3)  # Wait up to 3 seconds
-                    if self.web_process.is_alive():
-                        self._l.warning("Web process did not terminate gracefully, forcing termination")
-                        self.web_process.terminate()
-                        self.web_process.join(timeout=1)
-                    self._l.info("Web process terminated successfully")
-                except Exception as e:
-                    self._l.error(f"Error shutting down web process: {e}")
-                finally:
-                    self.web_process = None
-                    self.web_queue = None
+            if not blocking:
                 return PlayerOutcome(PlayerState.SUCCESS)
 
-            response = self.input_check_fn()
-            if response:
-                # Check if this is a web_key command - forward to web process
+            duration = web_config.get("duration")
+            stop_time = None
+            if duration:
+                stop_time = datetime.datetime.now() + datetime.timedelta(seconds=duration)
+                self._l.info(f"Web content will auto-stop after {duration} seconds")
+
+            while True:
+                time.sleep(0.05)
+                if stop_time and datetime.datetime.now() >= stop_time:
+                    self._l.info("Web content duration expired, shutting down")
+                    return PlayerOutcome(PlayerState.SUCCESS)
+
+                response = self.input_check_fn()
+                if not response:
+                    continue
                 if response.payload and isinstance(response.payload, str) and response.payload.startswith("web_key:"):
                     key_name = response.payload[8:]
                     if self.web_queue:
                         self.web_queue.put(f"key:{key_name}")
                         self._l.info(f"Forwarded key '{key_name}' to web process")
-                else:
-                    self._l.info("Sending the web channel shutdown command")
-                    self.web_queue.put("hide_window")
-                    self.web_process.join()
-                    self.web_process = None
-                    self.web_queue = None
-                    return response
-        return PlayerOutcome(PlayerState.SUCCESS)
+                    continue
+                return response
+        finally:
+            if blocking:
+                self._stop_web_process()
+                if released_mpv and not self._shutting_down:
+                    self._start_mpv()
 
     def schedule_panic(self, network_name):
         self._l.critical("*********************Schedule Panic*********************")
