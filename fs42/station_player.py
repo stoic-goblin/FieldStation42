@@ -374,19 +374,32 @@ class StationPlayer:
                 # self.mpv.vf = "lavfi=[]"
                 self._l.info(f"playing {file_path}")
                 self.mpv.command("playlist-clear")
-                self.mpv.play(file_path)
-                
-                
-                # Wait for video to load with timeout to prevent blocking on invalid streams.
-                # We wait for time_pos (not just duration) because duration can be populated
-                # from file headers before the demuxer is ready to seek — time_pos being
-                # non-None means MPV has actually started decoding and a seek will be honored.
+
+                # Join prerecorded files at their live point as part of the load
+                # itself. Starting at 0:00 and seeking after playback begins can
+                # expose mastering cards / first frames during channel changes.
+                live_offset = (
+                    float(current_time)
+                    if not is_stream and current_time is not None and current_time > 0
+                    else None
+                )
+                if live_offset is not None:
+                    self.mpv.command("loadfile", file_path, "replace", f"start={live_offset}")
+                    self._l.info(f"Loading at live offset: {live_offset}")
+                else:
+                    self.mpv.play(file_path)
+
+                # Wait for the *new file* to become active. time_pos alone is
+                # insufficient here because mpv can briefly retain the previous
+                # file's position after loadfile has been issued.
                 timeout_seconds = StationManager().server_conf.get("video_seek_timeout", 10)
                 start_time = time.time()
 
                 while True:
                     try:
-                        if self.mpv.time_pos is not None:
+                        loaded_path = self.mpv.path
+                        position = self.mpv.time_pos
+                        if loaded_path is not None and os.path.normpath(str(loaded_path)) == os.path.normpath(file_path) and position is not None:
                             break
                         if time.time() - start_time > timeout_seconds:
                             self._l.error(f"Timeout waiting for playback to start on {file_path}")
@@ -397,14 +410,6 @@ class StationPlayer:
                             self._l.error(f"Error waiting for playback: {e}")
                             return False
                         time.sleep(0.05)
-
-                # Perform seek if needed (before showing overlay)
-                if not is_stream and current_time is not None and current_time > 0:
-                    try:
-                        self.mpv.command("seek", current_time, "absolute")
-                        self._l.info(f"Seeking to: {current_time}")
-                    except Exception as e:
-                        self._l.error(f"Failed seeking {current_time} on {file_path}: {e}")
 
                 # Show Now Playing overlay for audio feature files
                 self._l.info(f"Media type: {media_type}, Content type: {content_type}")
