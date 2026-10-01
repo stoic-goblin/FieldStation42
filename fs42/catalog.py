@@ -163,6 +163,13 @@ class ShowCatalog:
         start_bumps = {}
         end_bumps = {}
 
+        # Station-level start/end bumps are valid defaults for every slot.
+        # Catalog them up front so slot planning can resolve them lazily.
+        if self.config.get("start_bump"):
+            start_bumps[self.config["start_bump"]] = True
+        if self.config.get("end_bump"):
+            end_bumps[self.config["end_bump"]] = True
+
         # get the list of all tags
         tags = {}
         bump_overrides = {}
@@ -204,7 +211,7 @@ class ShowCatalog:
             if "start_bump" in override:
                 start_bumps[override["start_bump"]] = True
             if "end_bump" in override:
-                end_bumps[override["start_bump"]] = True
+                end_bumps[override["end_bump"]] = True
 
         # check for date override tags
         date_overrides = self.config.get("date_overrides", {})
@@ -449,11 +456,11 @@ class ShowCatalog:
     def get_start_bump(self, fp):
         return self.__bump_finder("start_bumps", fp)
 
-    def get_end_bump(self, fp):
-        return self.__bump_finder("end_bumps", fp)
+    def get_end_bump(self, fp, max_duration=None):
+        return self.__bump_finder("end_bumps", fp, max_duration=max_duration)
 
 
-    def __bump_finder(self, bump_tag, fp):
+    def __bump_finder(self, bump_tag, fp, max_duration=None):
         candidates = []
 
         # first, was it directly referenced?
@@ -470,6 +477,9 @@ class ShowCatalog:
 
                 if parent_path == clean_match:
                     candidates.append(bump)
+
+        if max_duration is not None:
+            candidates = [candidate for candidate in candidates if candidate.duration <= max_duration]
 
         if len(candidates):
             winner = random.choice(candidates)

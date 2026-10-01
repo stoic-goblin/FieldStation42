@@ -95,6 +95,9 @@ The `network_type` property determines how the station operates:
 | `content_dir` | string | Directory containing video content files |
 | `bump_dir` | string | Directory containing bump/interstitial videos |
 | `commercial_dir` | string | Directory containing commercial videos |
+| `end_bump` | string | File or directory used for boundary media after a scheduled feature |
+| `end_bump_probability` | number | Chance (0.0–1.0) of reserving a fitting end bump for a block; default 1.0 |
+| `end_bump_min_reel_seconds` | number | Minimum seconds to preserve for ordinary reel/commercial fill after an end bump |
 | `runtime_dir` | string | Directory for runtime data (schedules, catalogs) |
 
 ### Media Files

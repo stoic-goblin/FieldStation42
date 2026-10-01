@@ -64,6 +64,25 @@
           "type": "string",
           "description": "Directory containing commercial videos"
         },
+        "start_bump": {
+          "type": "string",
+          "description": "Default path or directory for a bump before scheduled content"
+        },
+        "end_bump": {
+          "type": "string",
+          "description": "Default path or directory for a bump after scheduled content"
+        },
+        "end_bump_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Probability that a fitting end bump is reserved for a block; defaults to 1 when end_bump is configured"
+        },
+        "end_bump_min_reel_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Minimum seconds to leave for ordinary reel/commercial fill after selecting an end bump"
+        },
         "runtime_dir": {
           "type": "string",
           "description": "Runtime directory for station data"
@@ -520,6 +539,17 @@
         "end_bump": {
           "type": "string",
           "description": "Path to end bump video"
+        },
+        "end_bump_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Probability that a fitting end bump is reserved for this slot"
+        },
+        "end_bump_min_reel_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Minimum seconds to leave for ordinary reel/commercial fill after selecting an end bump"
         },
         "bump_dir": {
           "type": "string",

@@ -169,44 +169,52 @@ class LiquidSchedule:
         break_info = {
             "start_bump": None,
             "end_bump": None,
-            "bump_dir": None,
-            "commercial_dir": None,
+            "end_bump_path": slot_config.get("end_bump", self.conf.get("end_bump", None)),
+            "end_bump_probability": slot_config.get(
+                "end_bump_probability", self.conf.get("end_bump_probability", 1.0)
+            ),
+            "end_bump_min_reel_seconds": slot_config.get(
+                "end_bump_min_reel_seconds", self.conf.get("end_bump_min_reel_seconds", 0)
+            ),
+            "bump_dir": slot_config.get("bump_dir", self.conf.get("bump_dir", None)),
+            "commercial_dir": slot_config.get("commercial_dir", self.conf.get("commercial_dir", None)),
             "break_strategy": None,
-            "increment" : None
+            "increment": None,
         }
 
-        #first - extract slot level overrides
-        # does this slot have a start bump?
-        if "start_bump" in slot_config:
-            break_info["start_bump"] = self.catalog.get_start_bump(slot_config["start_bump"])
-        if "end_bump" in slot_config:
-            break_info["end_bump"] = self.catalog.get_end_bump(slot_config["end_bump"])
-
-        break_info["bump_dir"] = slot_config.get("bump_dir", self.conf.get("bump_dir", None))
-        break_info["commercial_dir"] = slot_config.get("commercial_dir", self.conf.get("commercial_dir", None))
-
+        start_bump_path = slot_config.get("start_bump", self.conf.get("start_bump", None))
         break_strategy = slot_config.get("break_strategy", self.conf["break_strategy"])
         increment = slot_config.get("schedule_increment", self.conf["schedule_increment"])
 
-        #now determine if we have a tag level override
+        # Determine whether a tag/path-specific override applies before resolving
+        # bump media. End bumps are deliberately resolved later, when LiquidBlock
+        # knows the exact amount of slack available before the next clock boundary.
         if "tag_overrides" in self.conf:
-            match = PathQuery.match_any_from_base(candidate_path, self.conf["content_dir"], self.conf["tag_overrides"].keys())
+            match = PathQuery.match_any_from_base(
+                candidate_path, self.conf["content_dir"], self.conf["tag_overrides"].keys()
+            )
             override = None
             if match:
                 override = self.conf["tag_overrides"][match]
             elif tag_str in self.conf["tag_overrides"]:
-                #direct match to tag string
                 override = self.conf["tag_overrides"][tag_str]
 
             if override:
-                if "start_bump" in override:
-                    break_info["start_bump"] = self.catalog.get_start_bump(override["start_bump"])
-                if "end_bump" in override:
-                    break_info["end_bump"] = self.catalog.get_end_bump(override["end_bump"])            
+                start_bump_path = override.get("start_bump", start_bump_path)
+                break_info["end_bump_path"] = override.get("end_bump", break_info["end_bump_path"])
+                break_info["end_bump_probability"] = override.get(
+                    "end_bump_probability", break_info["end_bump_probability"]
+                )
+                break_info["end_bump_min_reel_seconds"] = override.get(
+                    "end_bump_min_reel_seconds", break_info["end_bump_min_reel_seconds"]
+                )
                 break_info["bump_dir"] = override.get("bump_dir", break_info["bump_dir"])
                 break_info["commercial_dir"] = override.get("commercial_dir", break_info["commercial_dir"])
                 break_strategy = override.get("break_strategy", break_strategy)
                 increment = override.get("schedule_increment", increment)
+
+        if start_bump_path:
+            break_info["start_bump"] = self.catalog.get_start_bump(start_bump_path)
 
         return (break_info, break_strategy, increment)
 

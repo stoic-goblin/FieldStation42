@@ -115,6 +115,8 @@ class ConfigProcessor:
         overridable = [
             "start_bump",
             "end_bump",
+            "end_bump_probability",
+            "end_bump_min_reel_seconds",
             "bump_dir",
             "commercial_dir",
             "break_strategy",
